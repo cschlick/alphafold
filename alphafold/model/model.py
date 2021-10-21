@@ -31,6 +31,8 @@ def print_ret(ret):
   for key,value in ret.items():
     if hasattr(value,"shape"):
       print("  ",key,value.shape)
+    elif isinstance(value,(str,bool)):
+      print("  ",key,value)
     else:
       print("  ",key,type(value))
     if isinstance(value,dict):

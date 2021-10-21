@@ -274,11 +274,13 @@ class InvariantPointAttention(hk.Module):
 
     final_act = jnp.concatenate(output_features, axis=-1)
 
-    return common_modules.Linear(
+    ret = {}
+    ret["attn"] = common_modules.Linear(
         num_output,
         initializer=final_init,
         name='output_projection')(final_act)
 
+    return ret
 
 class FoldIteration(hk.Module):
   """A single iteration of the main structure module loop.
@@ -307,6 +309,13 @@ class FoldIteration(hk.Module):
                static_feat_2d=None,
                aatype=None):
     print("FoldIteration call:")
+    inputs = {"activations":activations,
+              "sequence_mask":sequence_mask,
+              "update_affine":update_affine,
+              "is_training":is_training,
+              "initial_act":initial_act}
+    from alphafold.model.model import print_ret
+    print_ret(inputs)
     c = self.config
 
     if safe_key is None:
@@ -325,11 +334,12 @@ class FoldIteration(hk.Module):
     act = activations['act']
     attention_module = InvariantPointAttention(self.config, self.global_config)
     # Attention
-    attn = attention_module(
+    ipa_ret = attention_module(
         inputs_1d=act,
         inputs_2d=static_feat_2d,
         mask=sequence_mask,
         affine=affine)
+    attn = ipa_ret["attn"]
     act += attn
     safe_key, *sub_keys = safe_key.split(3)
     sub_keys = iter(sub_keys)
