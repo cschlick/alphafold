@@ -16,9 +16,6 @@
 from typing import Any, Mapping, Optional, Union
 
 from absl import logging
-from alphafold.common import confidence
-from alphafold.model import features
-from alphafold.model import modules
 import haiku as hk
 import jax
 import ml_collections
@@ -26,6 +23,22 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 import tree
 
+from alphafold.common import confidence
+from alphafold.model import features
+from alphafold.model import modules
+
+def print_ret(ret):
+  for key,value in ret.items():
+    if hasattr(value,"shape"):
+      print("  ",key,value.shape)
+    else:
+      print("  ",key,type(value))
+    if isinstance(value,dict):
+      for key2,value2 in value.items():
+        if hasattr(value2,"shape"):
+          print("    ",key2,value2.shape)
+        else:
+          print("    ",key2,type(value2))
 
 def get_confidence_metrics(
     prediction_result: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -60,7 +73,8 @@ class RunModel:
           batch,
           is_training=False,
           compute_loss=False,
-          ensemble_representations=True)
+          ensemble_representations=True,
+          return_representations=True)
 
     self.apply = jax.jit(hk.transform(_forward_fn).apply)
     self.init = jax.jit(hk.transform(_forward_fn).init)

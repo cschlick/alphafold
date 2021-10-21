@@ -16,6 +16,13 @@
 
 import functools
 from typing import Dict
+
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import ml_collections
+import numpy as np
+
 from alphafold.common import residue_constants
 from alphafold.model import all_atom
 from alphafold.model import common_modules
@@ -23,11 +30,6 @@ from alphafold.model import prng
 from alphafold.model import quat_affine
 from alphafold.model import r3
 from alphafold.model import utils
-import haiku as hk
-import jax
-import jax.numpy as jnp
-import ml_collections
-import numpy as np
 
 
 def squared_difference(x, y):
@@ -304,6 +306,7 @@ class FoldIteration(hk.Module):
                safe_key=None,
                static_feat_2d=None,
                aatype=None):
+    print("FoldIteration call:")
     c = self.config
 
     if safe_key is None:
@@ -384,6 +387,10 @@ class FoldIteration(hk.Module):
         'act': act,
         'affine': affine.to_tensor()
     }
+    ret = {"new_activations":new_activations,"outputs":outputs}
+    print("FoldIteration return:")
+    from alphafold.model.model import print_ret
+    print_ret(ret)
     return new_activations, outputs
 
 
@@ -407,6 +414,7 @@ def generate_affines(representations, batch, config, global_config,
   Returns:
     A dictionary containing residue affines and sidechain positions.
   """
+  print("generate_affines call:")
   c = config
   sequence_mask = batch['seq_mask'][:, None]
 
@@ -457,6 +465,7 @@ def generate_affines(representations, batch, config, global_config,
   output = jax.tree_map(lambda *x: jnp.stack(x), *outputs)
   # Include the activations in the output dict for use by the LDDT-Head.
   output['act'] = activations['act']
+  print("generate_affines return:")
 
   return output
 
@@ -476,6 +485,7 @@ class StructureModule(hk.Module):
 
   def __call__(self, representations, batch, is_training,
                safe_key=None):
+    print("StructureModule call:")
     c = self.config
     ret = {}
 
@@ -509,13 +519,18 @@ class StructureModule(hk.Module):
     ret['final_atom_mask'] = batch['atom37_atom_exists']  # (N, 37)
     ret['final_affines'] = ret['traj'][-1]
 
+
+    print("StructureModule return:")
+    from alphafold.model.model import print_ret
+    print_ret(ret)
+
     if self.compute_loss:
       return ret
     else:
       no_loss_features = ['final_atom_positions', 'final_atom_mask',
                           'representations']
       no_loss_ret = {k: ret[k] for k in no_loss_features}
-      return no_loss_ret
+      return ret #no_loss_ret # debug
 
   def loss(self, value, batch):
     ret = {'loss': 0.}
@@ -750,10 +765,10 @@ def find_structural_violations(
   # Compute the Van der Waals radius for every atom
   # (the first letter of the atom name is the element type).
   # Shape: (N, 14).
-  atomtype_radius = jnp.array([
+  atomtype_radius = [
       residue_constants.van_der_waals_radius[name[0]]
       for name in residue_constants.atom_types
-  ])
+  ]
   atom14_atom_radius = batch['atom14_atom_exists'] * utils.batched_gather(
       atomtype_radius, batch['residx_atom14_to_atom37'])
 

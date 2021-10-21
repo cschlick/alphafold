@@ -17,6 +17,11 @@
 The structure generation code is in 'folding.py'.
 """
 import functools
+
+import haiku as hk
+import jax
+import jax.numpy as jnp
+
 from alphafold.common import residue_constants
 from alphafold.model import all_atom
 from alphafold.model import common_modules
@@ -27,9 +32,6 @@ from alphafold.model import mapping
 from alphafold.model import prng
 from alphafold.model import quat_affine
 from alphafold.model import utils
-import haiku as hk
-import jax
-import jax.numpy as jnp
 
 
 def softmax_cross_entropy(logits, labels):
@@ -142,8 +144,8 @@ class AlphaFoldIteration(hk.Module):
                is_training,
                compute_loss=False,
                ensemble_representations=False,
-               return_representations=False):
-
+               return_representations=True):
+    print("AlphaFoldIteration call:")
     num_ensemble = jnp.asarray(ensembled_batch['seq_length'].shape[0])
 
     if not ensemble_representations:
@@ -156,7 +158,7 @@ class AlphaFoldIteration(hk.Module):
 
     # Compute representations for each batch element and average.
     evoformer_module = EmbeddingsAndEvoformer(
-        self.config.embeddings_and_evoformer, self.global_config)
+      self.config.embeddings_and_evoformer, self.global_config)
     batch0 = slice_batch(0)
     representations = evoformer_module(batch0, is_training)
 
@@ -172,13 +174,13 @@ class AlphaFoldIteration(hk.Module):
         i, current_representations = x
         feats = slice_batch(i)
         representations_update = evoformer_module(
-            feats, is_training)
+          feats, is_training)
 
         new_representations = {}
         for k in current_representations:
           new_representations[k] = (
-              current_representations[k] + representations_update[k])
-        return i+1, new_representations
+                  current_representations[k] + representations_update[k])
+        return i + 1, new_representations
 
       if hk.running_init():
         # When initializing the Haiku module, run one iteration of the
@@ -186,9 +188,9 @@ class AlphaFoldIteration(hk.Module):
         _, representations = body((1, representations))
       else:
         _, representations = hk.while_loop(
-            lambda x: x[0] < num_ensemble,
-            body,
-            (1, representations))
+          lambda x: x[0] < num_ensemble,
+          body,
+          (1, representations))
 
       for k in representations:
         if k != 'msa':
@@ -203,13 +205,13 @@ class AlphaFoldIteration(hk.Module):
         continue  # Do not instantiate zero-weight heads.
 
       head_factory = {
-          'masked_msa': MaskedMsaHead,
-          'distogram': DistogramHead,
-          'structure_module': functools.partial(
-              folding.StructureModule, compute_loss=compute_loss),
-          'predicted_lddt': PredictedLDDTHead,
-          'predicted_aligned_error': PredictedAlignedErrorHead,
-          'experimentally_resolved': ExperimentallyResolvedHead,
+        'masked_msa': MaskedMsaHead,
+        'distogram': DistogramHead,
+        'structure_module': functools.partial(
+          folding.StructureModule, compute_loss=compute_loss),
+        'predicted_lddt': PredictedLDDTHead,
+        'predicted_aligned_error': PredictedAlignedErrorHead,
+        'experimentally_resolved': ExperimentallyResolvedHead,
       }[head_name]
       heads[head_name] = (head_config,
                           head_factory(head_config, self.global_config))
@@ -252,7 +254,7 @@ class AlphaFoldIteration(hk.Module):
         total_loss += loss(module, head_config, ret, name, filter_ret=False)
 
     if ('predicted_aligned_error' in self.config.heads
-        and self.config.heads.get('predicted_aligned_error.weight', 0.0)):
+            and self.config.heads.get('predicted_aligned_error.weight', 0.0)):
       # Add PredictedAlignedErrorHead after StructureModule executes.
       name = 'predicted_aligned_error'
       # Feed all previous results to give access to structure_module result.
@@ -260,6 +262,10 @@ class AlphaFoldIteration(hk.Module):
       ret[name] = module(representations, batch, is_training)
       if compute_loss:
         total_loss += loss(module, head_config, ret, name, filter_ret=False)
+
+    print("AlphaFoldIteration return:")
+    from alphafold.model.model import print_ret
+    print_ret(ret)
 
     if compute_loss:
       return ret, total_loss
@@ -279,12 +285,12 @@ class AlphaFold(hk.Module):
     self.global_config = config.global_config
 
   def __call__(
-      self,
-      batch,
-      is_training,
-      compute_loss=False,
-      ensemble_representations=False,
-      return_representations=False):
+          self,
+          batch,
+          is_training,
+          compute_loss=False,
+          ensemble_representations=False,
+          return_representations=True):
     """Run the AlphaFold model.
 
     Arguments:
@@ -305,16 +311,16 @@ class AlphaFold(hk.Module):
       The output of AlphaFoldIteration is a nested dictionary containing
       predictions from the various heads.
     """
-
+    print("Alphafold call:")
     impl = AlphaFoldIteration(self.config, self.global_config)
     batch_size, num_residues = batch['aatype'].shape
 
     def get_prev(ret):
       new_prev = {
-          'prev_pos':
-              ret['structure_module']['final_atom_positions'],
-          'prev_msa_first_row': ret['representations']['msa_first_row'],
-          'prev_pair': ret['representations']['pair'],
+        'prev_pos':
+          ret['structure_module']['final_atom_positions'],
+        'prev_msa_first_row': ret['representations']['msa_first_row'],
+        'prev_pair': ret['representations']['pair'],
       }
       return jax.tree_map(jax.lax.stop_gradient, new_prev)
 
@@ -323,10 +329,12 @@ class AlphaFold(hk.Module):
                 compute_loss=compute_loss):
       if self.config.resample_msa_in_recycling:
         num_ensemble = batch_size // (self.config.num_recycle + 1)
+
         def slice_recycle_idx(x):
           start = recycle_idx * num_ensemble
           size = num_ensemble
           return jax.lax.dynamic_slice_in_dim(x, start, size, axis=0)
+
         ensembled_batch = jax.tree_map(slice_recycle_idx, batch)
       else:
         num_ensemble = batch_size
@@ -335,21 +343,21 @@ class AlphaFold(hk.Module):
       non_ensembled_batch = jax.tree_map(lambda x: x, prev)
 
       return impl(
-          ensembled_batch=ensembled_batch,
-          non_ensembled_batch=non_ensembled_batch,
-          is_training=is_training,
-          compute_loss=compute_loss,
-          ensemble_representations=ensemble_representations)
+        ensembled_batch=ensembled_batch,
+        non_ensembled_batch=non_ensembled_batch,
+        is_training=is_training,
+        compute_loss=compute_loss,
+        ensemble_representations=ensemble_representations)
 
     if self.config.num_recycle:
       emb_config = self.config.embeddings_and_evoformer
       prev = {
-          'prev_pos': jnp.zeros(
-              [num_residues, residue_constants.atom_type_num, 3]),
-          'prev_msa_first_row': jnp.zeros(
-              [num_residues, emb_config.msa_channel]),
-          'prev_pair': jnp.zeros(
-              [num_residues, num_residues, emb_config.pair_channel]),
+        'prev_pos': jnp.zeros(
+          [num_residues, residue_constants.atom_type_num, 3]),
+        'prev_msa_first_row': jnp.zeros(
+          [num_residues, emb_config.msa_channel]),
+        'prev_pair': jnp.zeros(
+          [num_residues, num_residues, emb_config.pair_channel]),
       }
 
       if 'num_iter_recycling' in batch:
@@ -374,9 +382,9 @@ class AlphaFold(hk.Module):
         _, prev = body((0, prev))
       else:
         _, prev = hk.while_loop(
-            lambda x: x[0] < num_iter,
-            body,
-            (0, prev))
+          lambda x: x[0] < num_iter,
+          body,
+          (0, prev))
     else:
       prev = {}
       num_iter = 0
@@ -385,8 +393,13 @@ class AlphaFold(hk.Module):
     if compute_loss:
       ret = ret[0], [ret[1]]
 
+    print("Alphafold return:")
+    from alphafold.model.model import print_ret
+    print_ret(ret)
+
     if not return_representations:
-      del (ret[0] if compute_loss else ret)['representations']  # pytype: disable=unsupported-operands
+      del (ret[0] if compute_loss else ret)[
+        'representations']  # pytype: disable=unsupported-operands
     return ret
 
 
@@ -428,40 +441,40 @@ class TemplatePairStack(hk.Module):
       pair_act, safe_key = x
 
       dropout_wrapper_fn = functools.partial(
-          dropout_wrapper, is_training=is_training, global_config=gc)
+        dropout_wrapper, is_training=is_training, global_config=gc)
 
       safe_key, *sub_keys = safe_key.split(6)
       sub_keys = iter(sub_keys)
 
       pair_act = dropout_wrapper_fn(
-          TriangleAttention(c.triangle_attention_starting_node, gc,
-                            name='triangle_attention_starting_node'),
-          pair_act,
-          pair_mask,
-          next(sub_keys))
+        TriangleAttention(c.triangle_attention_starting_node, gc,
+                          name='triangle_attention_starting_node'),
+        pair_act,
+        pair_mask,
+        next(sub_keys))
       pair_act = dropout_wrapper_fn(
-          TriangleAttention(c.triangle_attention_ending_node, gc,
-                            name='triangle_attention_ending_node'),
-          pair_act,
-          pair_mask,
-          next(sub_keys))
+        TriangleAttention(c.triangle_attention_ending_node, gc,
+                          name='triangle_attention_ending_node'),
+        pair_act,
+        pair_mask,
+        next(sub_keys))
       pair_act = dropout_wrapper_fn(
-          TriangleMultiplication(c.triangle_multiplication_outgoing, gc,
-                                 name='triangle_multiplication_outgoing'),
-          pair_act,
-          pair_mask,
-          next(sub_keys))
+        TriangleMultiplication(c.triangle_multiplication_outgoing, gc,
+                               name='triangle_multiplication_outgoing'),
+        pair_act,
+        pair_mask,
+        next(sub_keys))
       pair_act = dropout_wrapper_fn(
-          TriangleMultiplication(c.triangle_multiplication_incoming, gc,
-                                 name='triangle_multiplication_incoming'),
-          pair_act,
-          pair_mask,
-          next(sub_keys))
+        TriangleMultiplication(c.triangle_multiplication_incoming, gc,
+                               name='triangle_multiplication_incoming'),
+        pair_act,
+        pair_mask,
+        next(sub_keys))
       pair_act = dropout_wrapper_fn(
-          Transition(c.pair_transition, gc, name='pair_transition'),
-          pair_act,
-          pair_mask,
-          next(sub_keys))
+        Transition(c.pair_transition, gc, name='pair_transition'),
+        pair_act,
+        pair_mask,
+        next(sub_keys))
 
       return pair_act, safe_key
 
@@ -502,29 +515,29 @@ class Transition(hk.Module):
     mask = jnp.expand_dims(mask, axis=-1)
 
     act = hk.LayerNorm(
-        axis=[-1],
-        create_scale=True,
-        create_offset=True,
-        name='input_layer_norm')(
-            act)
+      axis=[-1],
+      create_scale=True,
+      create_offset=True,
+      name='input_layer_norm')(
+      act)
 
     transition_module = hk.Sequential([
-        common_modules.Linear(
-            num_intermediate,
-            initializer='relu',
-            name='transition1'), jax.nn.relu,
-        common_modules.Linear(
-            nc,
-            initializer=utils.final_init(self.global_config),
-            name='transition2')
+      common_modules.Linear(
+        num_intermediate,
+        initializer='relu',
+        name='transition1'), jax.nn.relu,
+      common_modules.Linear(
+        nc,
+        initializer=utils.final_init(self.global_config),
+        name='transition2')
     ])
 
     act = mapping.inference_subbatch(
-        transition_module,
-        self.global_config.subbatch_size,
-        batched_args=[act],
-        nonbatched_args=[],
-        low_memory=not is_training)
+      transition_module,
+      self.global_config.subbatch_size,
+      batched_args=[act],
+      nonbatched_args=[],
+      low_memory=not is_training)
 
     return act
 
@@ -568,16 +581,16 @@ class Attention(hk.Module):
     value_dim = value_dim // num_head
 
     q_weights = hk.get_parameter(
-        'query_w', shape=(q_data.shape[-1], num_head, key_dim),
-        init=glorot_uniform())
+      'query_w', shape=(q_data.shape[-1], num_head, key_dim),
+      init=glorot_uniform())
     k_weights = hk.get_parameter(
-        'key_w', shape=(m_data.shape[-1], num_head, key_dim),
-        init=glorot_uniform())
+      'key_w', shape=(m_data.shape[-1], num_head, key_dim),
+      init=glorot_uniform())
     v_weights = hk.get_parameter(
-        'value_w', shape=(m_data.shape[-1], num_head, value_dim),
-        init=glorot_uniform())
+      'value_w', shape=(m_data.shape[-1], num_head, value_dim),
+      init=glorot_uniform())
 
-    q = jnp.einsum('bqa,ahc->bqhc', q_data, q_weights) * key_dim**(-0.5)
+    q = jnp.einsum('bqa,ahc->bqhc', q_data, q_weights) * key_dim ** (-0.5)
     k = jnp.einsum('bka,ahc->bkhc', m_data, k_weights)
     v = jnp.einsum('bka,ahc->bkhc', m_data, v_weights)
     logits = jnp.einsum('bqhc,bkhc->bhqk', q, k) + bias
@@ -593,13 +606,13 @@ class Attention(hk.Module):
 
     if self.config.gating:
       gating_weights = hk.get_parameter(
-          'gating_w',
-          shape=(q_data.shape[-1], num_head, value_dim),
-          init=hk.initializers.Constant(0.0))
+        'gating_w',
+        shape=(q_data.shape[-1], num_head, value_dim),
+        init=hk.initializers.Constant(0.0))
       gating_bias = hk.get_parameter(
-          'gating_b',
-          shape=(num_head, value_dim),
-          init=hk.initializers.Constant(1.0))
+        'gating_b',
+        shape=(num_head, value_dim),
+        init=hk.initializers.Constant(1.0))
 
       gate_values = jnp.einsum('bqc, chv->bqhv', q_data,
                                gating_weights) + gating_bias
@@ -609,8 +622,8 @@ class Attention(hk.Module):
       weighted_avg *= gate_values
 
     o_weights = hk.get_parameter(
-        'output_w', shape=(num_head, value_dim, self.output_dim),
-        init=init)
+      'output_w', shape=(num_head, value_dim, self.output_dim),
+      init=init)
     o_bias = hk.get_parameter('output_b', shape=(self.output_dim,),
                               init=hk.initializers.Constant(0.0))
 
@@ -658,20 +671,20 @@ class GlobalAttention(hk.Module):
     value_dim = value_dim // num_head
 
     q_weights = hk.get_parameter(
-        'query_w', shape=(q_data.shape[-1], num_head, key_dim),
-        init=glorot_uniform())
+      'query_w', shape=(q_data.shape[-1], num_head, key_dim),
+      init=glorot_uniform())
     k_weights = hk.get_parameter(
-        'key_w', shape=(m_data.shape[-1], key_dim),
-        init=glorot_uniform())
+      'key_w', shape=(m_data.shape[-1], key_dim),
+      init=glorot_uniform())
     v_weights = hk.get_parameter(
-        'value_w', shape=(m_data.shape[-1], value_dim),
-        init=glorot_uniform())
+      'value_w', shape=(m_data.shape[-1], value_dim),
+      init=glorot_uniform())
 
     v = jnp.einsum('bka,ac->bkc', m_data, v_weights)
 
     q_avg = utils.mask_mean(q_mask, q_data, axis=1)
 
-    q = jnp.einsum('ba,ahc->bhc', q_avg, q_weights) * key_dim**(-0.5)
+    q = jnp.einsum('ba,ahc->bhc', q_avg, q_weights) * key_dim ** (-0.5)
     k = jnp.einsum('bka,ac->bkc', m_data, k_weights)
     bias = (1e9 * (q_mask[:, None, :, 0] - 1.))
     logits = jnp.einsum('bhc,bkc->bhk', q, k) + bias
@@ -684,20 +697,20 @@ class GlobalAttention(hk.Module):
       init = glorot_uniform()
 
     o_weights = hk.get_parameter(
-        'output_w', shape=(num_head, value_dim, self.output_dim),
-        init=init)
+      'output_w', shape=(num_head, value_dim, self.output_dim),
+      init=init)
     o_bias = hk.get_parameter('output_b', shape=(self.output_dim,),
                               init=hk.initializers.Constant(0.0))
 
     if self.config.gating:
       gating_weights = hk.get_parameter(
-          'gating_w',
-          shape=(q_data.shape[-1], num_head, value_dim),
-          init=hk.initializers.Constant(0.0))
+        'gating_w',
+        shape=(q_data.shape[-1], num_head, value_dim),
+        init=hk.initializers.Constant(0.0))
       gating_bias = hk.get_parameter(
-          'gating_b',
-          shape=(num_head, value_dim),
-          init=hk.initializers.Constant(1.0))
+        'gating_b',
+        shape=(num_head, value_dim),
+        init=hk.initializers.Constant(1.0))
 
       gate_values = jnp.einsum('bqc, chv->bqhv', q_data, gating_weights)
       gate_values = jax.nn.sigmoid(gate_values + gating_bias)
@@ -747,31 +760,31 @@ class MSARowAttentionWithPairBias(hk.Module):
     assert len(bias.shape) == 4
 
     msa_act = hk.LayerNorm(
-        axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
-            msa_act)
+      axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
+      msa_act)
 
     pair_act = hk.LayerNorm(
-        axis=[-1],
-        create_scale=True,
-        create_offset=True,
-        name='feat_2d_norm')(
-            pair_act)
+      axis=[-1],
+      create_scale=True,
+      create_offset=True,
+      name='feat_2d_norm')(
+      pair_act)
 
     init_factor = 1. / jnp.sqrt(int(pair_act.shape[-1]))
     weights = hk.get_parameter(
-        'feat_2d_weights',
-        shape=(pair_act.shape[-1], c.num_head),
-        init=hk.initializers.RandomNormal(stddev=init_factor))
+      'feat_2d_weights',
+      shape=(pair_act.shape[-1], c.num_head),
+      init=hk.initializers.RandomNormal(stddev=init_factor))
     nonbatched_bias = jnp.einsum('qkc,ch->hqk', pair_act, weights)
 
     attn_mod = Attention(
-        c, self.global_config, msa_act.shape[-1])
+      c, self.global_config, msa_act.shape[-1])
     msa_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[msa_act, msa_act, bias],
-        nonbatched_args=[nonbatched_bias],
-        low_memory=not is_training)
+      attn_mod,
+      self.global_config.subbatch_size,
+      batched_args=[msa_act, msa_act, bias],
+      nonbatched_args=[nonbatched_bias],
+      low_memory=not is_training)
 
     return msa_act
 
@@ -814,17 +827,17 @@ class MSAColumnAttention(hk.Module):
     assert len(bias.shape) == 4
 
     msa_act = hk.LayerNorm(
-        axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
-            msa_act)
+      axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
+      msa_act)
 
     attn_mod = Attention(
-        c, self.global_config, msa_act.shape[-1])
+      c, self.global_config, msa_act.shape[-1])
     msa_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[msa_act, msa_act, bias],
-        nonbatched_args=[],
-        low_memory=not is_training)
+      attn_mod,
+      self.global_config.subbatch_size,
+      batched_args=[msa_act, msa_act, bias],
+      nonbatched_args=[],
+      low_memory=not is_training)
 
     msa_act = jnp.swapaxes(msa_act, -2, -3)
 
@@ -869,20 +882,20 @@ class MSAColumnGlobalAttention(hk.Module):
     assert len(bias.shape) == 4
 
     msa_act = hk.LayerNorm(
-        axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
-            msa_act)
+      axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
+      msa_act)
 
     attn_mod = GlobalAttention(
-        c, self.global_config, msa_act.shape[-1],
-        name='attention')
+      c, self.global_config, msa_act.shape[-1],
+      name='attention')
     # [N_seq, N_res, 1]
     msa_mask = jnp.expand_dims(msa_mask, axis=-1)
     msa_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[msa_act, msa_act, msa_mask, bias],
-        nonbatched_args=[],
-        low_memory=not is_training)
+      attn_mod,
+      self.global_config.subbatch_size,
+      batched_args=[msa_act, msa_act, msa_mask, bias],
+      nonbatched_args=[],
+      low_memory=not is_training)
 
     msa_act = jnp.swapaxes(msa_act, -2, -3)
 
@@ -926,24 +939,24 @@ class TriangleAttention(hk.Module):
     assert len(bias.shape) == 4
 
     pair_act = hk.LayerNorm(
-        axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
-            pair_act)
+      axis=[-1], create_scale=True, create_offset=True, name='query_norm')(
+      pair_act)
 
     init_factor = 1. / jnp.sqrt(int(pair_act.shape[-1]))
     weights = hk.get_parameter(
-        'feat_2d_weights',
-        shape=(pair_act.shape[-1], c.num_head),
-        init=hk.initializers.RandomNormal(stddev=init_factor))
+      'feat_2d_weights',
+      shape=(pair_act.shape[-1], c.num_head),
+      init=hk.initializers.RandomNormal(stddev=init_factor))
     nonbatched_bias = jnp.einsum('qkc,ch->hqk', pair_act, weights)
 
     attn_mod = Attention(
-        c, self.global_config, pair_act.shape[-1])
+      c, self.global_config, pair_act.shape[-1])
     pair_act = mapping.inference_subbatch(
-        attn_mod,
-        self.global_config.subbatch_size,
-        batched_args=[pair_act, pair_act, bias],
-        nonbatched_args=[nonbatched_bias],
-        low_memory=not is_training)
+      attn_mod,
+      self.global_config.subbatch_size,
+      batched_args=[pair_act, pair_act, bias],
+      nonbatched_args=[nonbatched_bias],
+      low_memory=not is_training)
 
     if c.orientation == 'per_column':
       pair_act = jnp.swapaxes(pair_act, -2, -3)
@@ -981,16 +994,16 @@ class MaskedMsaHead(hk.Module):
     """
     del batch
     logits = common_modules.Linear(
-        self.config.num_output,
-        initializer=utils.final_init(self.global_config),
-        name='logits')(
-            representations['msa'])
+      self.config.num_output,
+      initializer=utils.final_init(self.global_config),
+      name='logits')(
+      representations['msa'])
     return dict(logits=logits)
 
   def loss(self, value, batch):
     errors = softmax_cross_entropy(
-        labels=jax.nn.one_hot(batch['true_msa'], num_classes=23),
-        logits=value['logits'])
+      labels=jax.nn.one_hot(batch['true_msa'], num_classes=23),
+      logits=value['logits'])
     loss = (jnp.sum(errors * batch['bert_mask'], axis=(-2, -1)) /
             (1e-8 + jnp.sum(batch['bert_mask'], axis=(-2, -1))))
     return {'loss': loss}
@@ -1026,31 +1039,31 @@ class PredictedLDDTHead(hk.Module):
     act = representations['structure_module']
 
     act = hk.LayerNorm(
-        axis=[-1],
-        create_scale=True,
-        create_offset=True,
-        name='input_layer_norm')(
-            act)
+      axis=[-1],
+      create_scale=True,
+      create_offset=True,
+      name='input_layer_norm')(
+      act)
 
     act = common_modules.Linear(
-        self.config.num_channels,
-        initializer='relu',
-        name='act_0')(
-            act)
+      self.config.num_channels,
+      initializer='relu',
+      name='act_0')(
+      act)
     act = jax.nn.relu(act)
 
     act = common_modules.Linear(
-        self.config.num_channels,
-        initializer='relu',
-        name='act_1')(
-            act)
+      self.config.num_channels,
+      initializer='relu',
+      name='act_1')(
+      act)
     act = jax.nn.relu(act)
 
     logits = common_modules.Linear(
-        self.config.num_bins,
-        initializer=utils.final_init(self.global_config),
-        name='logits')(
-            act)
+      self.config.num_bins,
+      initializer=utils.final_init(self.global_config),
+      name='logits')(
+      act)
     # Shape (batch_size, num_res, num_bins)
     return dict(logits=logits)
 
@@ -1064,14 +1077,14 @@ class PredictedLDDTHead(hk.Module):
 
     # Shape (num_res,)
     lddt_ca = lddt.lddt(
-        # Shape (batch_size, num_res, 3)
-        predicted_points=pred_all_atom_pos[None, :, 1, :],
-        # Shape (batch_size, num_res, 3)
-        true_points=true_all_atom_pos[None, :, 1, :],
-        # Shape (batch_size, num_res, 1)
-        true_points_mask=all_atom_mask[None, :, 1:2].astype(jnp.float32),
-        cutoff=15.,
-        per_residue=True)[0]
+      # Shape (batch_size, num_res, 3)
+      predicted_points=pred_all_atom_pos[None, :, 1, :],
+      # Shape (batch_size, num_res, 3)
+      true_points=true_all_atom_pos[None, :, 1, :],
+      # Shape (batch_size, num_res, 1)
+      true_points_mask=all_atom_mask[None, :, 1:2].astype(jnp.float32),
+      cutoff=15.,
+      per_residue=True)[0]
     lddt_ca = jax.lax.stop_gradient(lddt_ca)
 
     num_bins = self.config.num_bins
@@ -1094,7 +1107,7 @@ class PredictedLDDTHead(hk.Module):
       # NMR & distillation have resolution = 0
       loss *= ((batch['resolution'] >= self.config.min_resolution)
                & (batch['resolution'] <= self.config.max_resolution)).astype(
-                   jnp.float32)
+        jnp.float32)
 
     output = {'loss': loss}
     return output
@@ -1132,21 +1145,21 @@ class PredictedAlignedErrorHead(hk.Module):
 
     # Shape (num_res, num_res, num_bins)
     logits = common_modules.Linear(
-        self.config.num_bins,
-        initializer=utils.final_init(self.global_config),
-        name='logits')(act)
+      self.config.num_bins,
+      initializer=utils.final_init(self.global_config),
+      name='logits')(act)
     # Shape (num_bins,)
     breaks = jnp.linspace(
-        0., self.config.max_error_bin, self.config.num_bins - 1)
+      0., self.config.max_error_bin, self.config.num_bins - 1)
     return dict(logits=logits, breaks=breaks)
 
   def loss(self, value, batch):
     # Shape (num_res, 7)
     predicted_affine = quat_affine.QuatAffine.from_tensor(
-        value['structure_module']['final_affines'])
+      value['structure_module']['final_affines'])
     # Shape (num_res, 7)
     true_affine = quat_affine.QuatAffine.from_tensor(
-        batch['backbone_affine_tensor'])
+      batch['backbone_affine_tensor'])
     # Shape (num_res)
     mask = batch['backbone_affine_mask']
     # Shape (num_res, num_res)
@@ -1161,10 +1174,11 @@ class PredictedAlignedErrorHead(hk.Module):
     def _local_frame_points(affine):
       points = [jnp.expand_dims(x, axis=-2) for x in affine.translation]
       return affine.invert_point(points, extra_dims=1)
+
     error_dist2_xyz = [
-        jnp.square(a - b)
-        for a, b in zip(_local_frame_points(predicted_affine),
-                        _local_frame_points(true_affine))]
+      jnp.square(a - b)
+      for a, b in zip(_local_frame_points(predicted_affine),
+                      _local_frame_points(true_affine))]
     error_dist2 = sum(error_dist2_xyz)
     # Shape (num_res, num_res)
     # First num_res are alignment frames, second num_res are the residues.
@@ -1172,10 +1186,11 @@ class PredictedAlignedErrorHead(hk.Module):
 
     sq_breaks = jnp.square(breaks)
     true_bins = jnp.sum((
-        error_dist2[..., None] > sq_breaks).astype(jnp.int32), axis=-1)
+                                error_dist2[..., None] > sq_breaks).astype(
+      jnp.int32), axis=-1)
 
     errors = softmax_cross_entropy(
-        labels=jax.nn.one_hot(true_bins, num_bins, axis=-1), logits=logits)
+      labels=jax.nn.one_hot(true_bins, num_bins, axis=-1), logits=logits)
 
     loss = (jnp.sum(errors * square_mask, axis=(-2, -1)) /
             (1e-8 + jnp.sum(square_mask, axis=(-2, -1))))
@@ -1184,7 +1199,7 @@ class PredictedAlignedErrorHead(hk.Module):
       # NMR & distillation have resolution = 0
       loss *= ((batch['resolution'] >= self.config.min_resolution)
                & (batch['resolution'] <= self.config.max_resolution)).astype(
-                   jnp.float32)
+        jnp.float32)
 
     output = {'loss': loss}
     return output
@@ -1219,9 +1234,9 @@ class ExperimentallyResolvedHead(hk.Module):
             can be converted to probability by applying sigmoid.
     """
     logits = common_modules.Linear(
-        37,  # atom_exists.shape[-1]
-        initializer=utils.final_init(self.global_config),
-        name='logits')(representations['single'])
+      37,  # atom_exists.shape[-1]
+      initializer=utils.final_init(self.global_config),
+      name='logits')(representations['single'])
     return dict(logits=logits)
 
   def loss(self, value, batch):
@@ -1241,7 +1256,7 @@ class ExperimentallyResolvedHead(hk.Module):
       # NMR & distillation examples have resolution = 0.
       loss *= ((batch['resolution'] >= self.config.min_resolution)
                & (batch['resolution'] <= self.config.max_resolution)).astype(
-                   jnp.float32)
+        jnp.float32)
 
     output = {'loss': loss}
     return output
@@ -1281,57 +1296,51 @@ class TriangleMultiplication(hk.Module):
     input_act = act
 
     left_projection = common_modules.Linear(
-        c.num_intermediate_channel,
-        name='left_projection')
+      c.num_intermediate_channel,
+      name='left_projection')
     left_proj_act = mask * left_projection(act)
 
     right_projection = common_modules.Linear(
-        c.num_intermediate_channel,
-        name='right_projection')
+      c.num_intermediate_channel,
+      name='right_projection')
     right_proj_act = mask * right_projection(act)
 
     left_gate_values = jax.nn.sigmoid(common_modules.Linear(
-        c.num_intermediate_channel,
-        bias_init=1.,
-        initializer=utils.final_init(gc),
-        name='left_gate')(act))
+      c.num_intermediate_channel,
+      bias_init=1.,
+      initializer=utils.final_init(gc),
+      name='left_gate')(act))
 
     right_gate_values = jax.nn.sigmoid(common_modules.Linear(
-        c.num_intermediate_channel,
-        bias_init=1.,
-        initializer=utils.final_init(gc),
-        name='right_gate')(act))
+      c.num_intermediate_channel,
+      bias_init=1.,
+      initializer=utils.final_init(gc),
+      name='right_gate')(act))
 
     left_proj_act *= left_gate_values
     right_proj_act *= right_gate_values
 
-    # "Outgoing" edges equation: 'ikc,jkc->ijc'
-    # "Incoming" edges equation: 'kjc,kic->ijc'
-    # Note on the Suppl. Alg. 11 & 12 notation:
-    # For the "outgoing" edges, a = left_proj_act and b = right_proj_act
-    # For the "incoming" edges, it's swapped:
-    #   b = left_proj_act and a = right_proj_act
     act = jnp.einsum(c.equation, left_proj_act, right_proj_act)
 
     act = hk.LayerNorm(
-        axis=[-1],
-        create_scale=True,
-        create_offset=True,
-        name='center_layer_norm')(
-            act)
+      axis=[-1],
+      create_scale=True,
+      create_offset=True,
+      name='center_layer_norm')(
+      act)
 
     output_channel = int(input_act.shape[-1])
 
     act = common_modules.Linear(
-        output_channel,
-        initializer=utils.final_init(gc),
-        name='output_projection')(act)
+      output_channel,
+      initializer=utils.final_init(gc),
+      name='output_projection')(act)
 
     gate_values = jax.nn.sigmoid(common_modules.Linear(
-        output_channel,
-        bias_init=1.,
-        initializer=utils.final_init(gc),
-        name='gating_linear')(input_act))
+      output_channel,
+      bias_init=1.,
+      initializer=utils.final_init(gc),
+      name='gating_linear')(input_act))
     act *= gate_values
 
     return act
@@ -1363,10 +1372,10 @@ class DistogramHead(hk.Module):
         * bin_breaks: array containing bin breaks, shape [N_bins - 1,].
     """
     half_logits = common_modules.Linear(
-        self.config.num_bins,
-        initializer=utils.final_init(self.global_config),
-        name='half_logits')(
-            representations['pair'])
+      self.config.num_bins,
+      initializer=utils.final_init(self.global_config),
+      name='half_logits')(
+      representations['pair'])
 
     logits = half_logits + jnp.swapaxes(half_logits, -2, -3)
     breaks = jnp.linspace(self.config.first_break, self.config.last_break,
@@ -1391,22 +1400,22 @@ def _distogram_log_loss(logits, bin_edges, batch, num_bins):
   sq_breaks = jnp.square(bin_edges)
 
   dist2 = jnp.sum(
-      jnp.square(
-          jnp.expand_dims(positions, axis=-2) -
-          jnp.expand_dims(positions, axis=-3)),
-      axis=-1,
-      keepdims=True)
+    jnp.square(
+      jnp.expand_dims(positions, axis=-2) -
+      jnp.expand_dims(positions, axis=-3)),
+    axis=-1,
+    keepdims=True)
 
   true_bins = jnp.sum(dist2 > sq_breaks, axis=-1)
 
   errors = softmax_cross_entropy(
-      labels=jax.nn.one_hot(true_bins, num_bins), logits=logits)
+    labels=jax.nn.one_hot(true_bins, num_bins), logits=logits)
 
   square_mask = jnp.expand_dims(mask, axis=-2) * jnp.expand_dims(mask, axis=-1)
 
   avg_error = (
-      jnp.sum(errors * square_mask, axis=(-2, -1)) /
-      (1e-6 + jnp.sum(square_mask, axis=(-2, -1))))
+          jnp.sum(errors * square_mask, axis=(-2, -1)) /
+          (1e-6 + jnp.sum(square_mask, axis=(-2, -1))))
   dist2 = dist2[..., 0]
   return dict(loss=avg_error, true_dist=jnp.sqrt(1e-6 + dist2))
 
@@ -1445,16 +1454,16 @@ class OuterProductMean(hk.Module):
     act = hk.LayerNorm([-1], True, True, name='layer_norm_input')(act)
 
     left_act = mask * common_modules.Linear(
-        c.num_outer_channel,
-        initializer='linear',
-        name='left_projection')(
-            act)
+      c.num_outer_channel,
+      initializer='linear',
+      name='left_projection')(
+      act)
 
     right_act = mask * common_modules.Linear(
-        c.num_outer_channel,
-        initializer='linear',
-        name='right_projection')(
-            act)
+      c.num_outer_channel,
+      initializer='linear',
+      name='right_projection')(
+      act)
 
     if gc.zero_init:
       init_w = hk.initializers.Constant(0.0)
@@ -1462,13 +1471,13 @@ class OuterProductMean(hk.Module):
       init_w = hk.initializers.VarianceScaling(scale=2., mode='fan_in')
 
     output_w = hk.get_parameter(
-        'output_w',
-        shape=(c.num_outer_channel, c.num_outer_channel,
-               self.num_output_channel),
-        init=init_w)
+      'output_w',
+      shape=(c.num_outer_channel, c.num_outer_channel,
+             self.num_output_channel),
+      init=init_w)
     output_b = hk.get_parameter(
-        'output_b', shape=(self.num_output_channel,),
-        init=hk.initializers.Constant(0.0))
+      'output_b', shape=(self.num_output_channel,),
+      init=hk.initializers.Constant(0.0))
 
     def compute_chunk(left_act):
       # This is equivalent to
@@ -1483,13 +1492,13 @@ class OuterProductMean(hk.Module):
       return jnp.transpose(act, [1, 0, 2])
 
     act = mapping.inference_subbatch(
-        compute_chunk,
-        c.chunk_size,
-        batched_args=[left_act],
-        nonbatched_args=[],
-        low_memory=True,
-        input_subbatch_dim=1,
-        output_subbatch_dim=0)
+      compute_chunk,
+      c.chunk_size,
+      batched_args=[left_act],
+      nonbatched_args=[],
+      low_memory=True,
+      input_subbatch_dim=1,
+      output_subbatch_dim=0)
 
     epsilon = 1e-3
     norm = jnp.einsum('abc,adc->bdc', mask, mask)
@@ -1520,10 +1529,10 @@ def dgram_from_positions(positions, num_bins, min_bin, max_bin):
   upper_breaks = jnp.concatenate([lower_breaks[1:],
                                   jnp.array([1e8], dtype=jnp.float32)], axis=-1)
   dist2 = jnp.sum(
-      squared_difference(
-          jnp.expand_dims(positions, axis=-2),
-          jnp.expand_dims(positions, axis=-3)),
-      axis=-1, keepdims=True)
+    squared_difference(
+      jnp.expand_dims(positions, axis=-2),
+      jnp.expand_dims(positions, axis=-3)),
+    axis=-1, keepdims=True)
 
   dgram = ((dist2 > lower_breaks).astype(jnp.float32) *
            (dist2 < upper_breaks).astype(jnp.float32))
@@ -1537,13 +1546,13 @@ def pseudo_beta_fn(aatype, all_atom_positions, all_atom_masks):
   ca_idx = residue_constants.atom_order['CA']
   cb_idx = residue_constants.atom_order['CB']
   pseudo_beta = jnp.where(
-      jnp.tile(is_gly[..., None], [1] * len(is_gly.shape) + [3]),
-      all_atom_positions[..., ca_idx, :],
-      all_atom_positions[..., cb_idx, :])
+    jnp.tile(is_gly[..., None], [1] * len(is_gly.shape) + [3]),
+    all_atom_positions[..., ca_idx, :],
+    all_atom_positions[..., cb_idx, :])
 
   if all_atom_masks is not None:
     pseudo_beta_mask = jnp.where(
-        is_gly, all_atom_masks[..., ca_idx], all_atom_masks[..., cb_idx])
+      is_gly, all_atom_masks[..., ca_idx], all_atom_masks[..., cb_idx])
     pseudo_beta_mask = pseudo_beta_mask.astype(jnp.float32)
     return pseudo_beta, pseudo_beta_mask
   else:
@@ -1590,82 +1599,82 @@ class EvoformerIteration(hk.Module):
     msa_mask, pair_mask = masks['msa'], masks['pair']
 
     dropout_wrapper_fn = functools.partial(
-        dropout_wrapper,
-        is_training=is_training,
-        global_config=gc)
+      dropout_wrapper,
+      is_training=is_training,
+      global_config=gc)
 
     safe_key, *sub_keys = safe_key.split(10)
     sub_keys = iter(sub_keys)
 
     msa_act = dropout_wrapper_fn(
-        MSARowAttentionWithPairBias(
-            c.msa_row_attention_with_pair_bias, gc,
-            name='msa_row_attention_with_pair_bias'),
-        msa_act,
-        msa_mask,
-        safe_key=next(sub_keys),
-        pair_act=pair_act)
+      MSARowAttentionWithPairBias(
+        c.msa_row_attention_with_pair_bias, gc,
+        name='msa_row_attention_with_pair_bias'),
+      msa_act,
+      msa_mask,
+      safe_key=next(sub_keys),
+      pair_act=pair_act)
 
     if not self.is_extra_msa:
       attn_mod = MSAColumnAttention(
-          c.msa_column_attention, gc, name='msa_column_attention')
+        c.msa_column_attention, gc, name='msa_column_attention')
     else:
       attn_mod = MSAColumnGlobalAttention(
-          c.msa_column_attention, gc, name='msa_column_global_attention')
+        c.msa_column_attention, gc, name='msa_column_global_attention')
     msa_act = dropout_wrapper_fn(
-        attn_mod,
-        msa_act,
-        msa_mask,
-        safe_key=next(sub_keys))
+      attn_mod,
+      msa_act,
+      msa_mask,
+      safe_key=next(sub_keys))
 
     msa_act = dropout_wrapper_fn(
-        Transition(c.msa_transition, gc, name='msa_transition'),
-        msa_act,
-        msa_mask,
-        safe_key=next(sub_keys))
+      Transition(c.msa_transition, gc, name='msa_transition'),
+      msa_act,
+      msa_mask,
+      safe_key=next(sub_keys))
 
     pair_act = dropout_wrapper_fn(
-        OuterProductMean(
-            config=c.outer_product_mean,
-            global_config=self.global_config,
-            num_output_channel=int(pair_act.shape[-1]),
-            name='outer_product_mean'),
-        msa_act,
-        msa_mask,
-        safe_key=next(sub_keys),
-        output_act=pair_act)
+      OuterProductMean(
+        config=c.outer_product_mean,
+        global_config=self.global_config,
+        num_output_channel=int(pair_act.shape[-1]),
+        name='outer_product_mean'),
+      msa_act,
+      msa_mask,
+      safe_key=next(sub_keys),
+      output_act=pair_act)
 
     pair_act = dropout_wrapper_fn(
-        TriangleMultiplication(c.triangle_multiplication_outgoing, gc,
-                               name='triangle_multiplication_outgoing'),
-        pair_act,
-        pair_mask,
-        safe_key=next(sub_keys))
+      TriangleMultiplication(c.triangle_multiplication_outgoing, gc,
+                             name='triangle_multiplication_outgoing'),
+      pair_act,
+      pair_mask,
+      safe_key=next(sub_keys))
     pair_act = dropout_wrapper_fn(
-        TriangleMultiplication(c.triangle_multiplication_incoming, gc,
-                               name='triangle_multiplication_incoming'),
-        pair_act,
-        pair_mask,
-        safe_key=next(sub_keys))
+      TriangleMultiplication(c.triangle_multiplication_incoming, gc,
+                             name='triangle_multiplication_incoming'),
+      pair_act,
+      pair_mask,
+      safe_key=next(sub_keys))
 
     pair_act = dropout_wrapper_fn(
-        TriangleAttention(c.triangle_attention_starting_node, gc,
-                          name='triangle_attention_starting_node'),
-        pair_act,
-        pair_mask,
-        safe_key=next(sub_keys))
+      TriangleAttention(c.triangle_attention_starting_node, gc,
+                        name='triangle_attention_starting_node'),
+      pair_act,
+      pair_mask,
+      safe_key=next(sub_keys))
     pair_act = dropout_wrapper_fn(
-        TriangleAttention(c.triangle_attention_ending_node, gc,
-                          name='triangle_attention_ending_node'),
-        pair_act,
-        pair_mask,
-        safe_key=next(sub_keys))
+      TriangleAttention(c.triangle_attention_ending_node, gc,
+                        name='triangle_attention_ending_node'),
+      pair_act,
+      pair_mask,
+      safe_key=next(sub_keys))
 
     pair_act = dropout_wrapper_fn(
-        Transition(c.pair_transition, gc, name='pair_transition'),
-        pair_act,
-        pair_mask,
-        safe_key=next(sub_keys))
+      Transition(c.pair_transition, gc, name='pair_transition'),
+      pair_act,
+      pair_mask,
+      safe_key=next(sub_keys))
 
     return {'msa': msa_act, 'pair': pair_act}
 
@@ -1694,21 +1703,21 @@ class EmbeddingsAndEvoformer(hk.Module):
     # Jumper et al. (2021) Suppl. Alg. 2 "Inference" line 5
     # Jumper et al. (2021) Suppl. Alg. 3 "InputEmbedder"
     preprocess_1d = common_modules.Linear(
-        c.msa_channel, name='preprocess_1d')(
-            batch['target_feat'])
+      c.msa_channel, name='preprocess_1d')(
+      batch['target_feat'])
 
     preprocess_msa = common_modules.Linear(
-        c.msa_channel, name='preprocess_msa')(
-            batch['msa_feat'])
+      c.msa_channel, name='preprocess_msa')(
+      batch['msa_feat'])
 
     msa_activations = jnp.expand_dims(preprocess_1d, axis=0) + preprocess_msa
 
     left_single = common_modules.Linear(
-        c.pair_channel, name='left_single')(
-            batch['target_feat'])
+      c.pair_channel, name='left_single')(
+      batch['target_feat'])
     right_single = common_modules.Linear(
-        c.pair_channel, name='right_single')(
-            batch['target_feat'])
+      c.pair_channel, name='right_single')(
+      batch['target_feat'])
     pair_activations = left_single[:, None] + right_single[None]
     mask_2d = batch['seq_mask'][:, None] * batch['seq_mask'][None, :]
 
@@ -1717,11 +1726,11 @@ class EmbeddingsAndEvoformer(hk.Module):
     # Jumper et al. (2021) Suppl. Alg. 32 "RecyclingEmbedder"
     if c.recycle_pos and 'prev_pos' in batch:
       prev_pseudo_beta = pseudo_beta_fn(
-          batch['aatype'], batch['prev_pos'], None)
+        batch['aatype'], batch['prev_pos'], None)
       dgram = dgram_from_positions(prev_pseudo_beta, **self.config.prev_pos)
       pair_activations += common_modules.Linear(
-          c.pair_channel, name='prev_pos_linear')(
-              dgram)
+        c.pair_channel, name='prev_pos_linear')(
+        dgram)
 
     if c.recycle_features:
       if 'prev_msa_first_row' in batch:
@@ -1729,7 +1738,7 @@ class EmbeddingsAndEvoformer(hk.Module):
                                           True,
                                           True,
                                           name='prev_msa_first_row_norm')(
-                                              batch['prev_msa_first_row'])
+          batch['prev_msa_first_row'])
         msa_activations = jax.ops.index_add(msa_activations, 0,
                                             prev_msa_first_row)
 
@@ -1738,7 +1747,7 @@ class EmbeddingsAndEvoformer(hk.Module):
                                          True,
                                          True,
                                          name='prev_pair_norm')(
-                                             batch['prev_pair'])
+          batch['prev_pair'])
 
     # Relative position encoding.
     # Jumper et al. (2021) Suppl. Alg. 4 "relpos"
@@ -1748,24 +1757,24 @@ class EmbeddingsAndEvoformer(hk.Module):
       pos = batch['residue_index']
       offset = pos[:, None] - pos[None, :]
       rel_pos = jax.nn.one_hot(
-          jnp.clip(
-              offset + c.max_relative_feature,
-              a_min=0,
-              a_max=2 * c.max_relative_feature),
-          2 * c.max_relative_feature + 1)
+        jnp.clip(
+          offset + c.max_relative_feature,
+          a_min=0,
+          a_max=2 * c.max_relative_feature),
+        2 * c.max_relative_feature + 1)
       pair_activations += common_modules.Linear(
-          c.pair_channel, name='pair_activiations')(
-              rel_pos)
+        c.pair_channel, name='pair_activiations')(
+        rel_pos)
 
     # Embed templates into the pair activations.
     # Jumper et al. (2021) Suppl. Alg. 2 "Inference" lines 9-13
     if c.template.enabled:
       template_batch = {k: batch[k] for k in batch if k.startswith('template_')}
       template_pair_representation = TemplateEmbedding(c.template, gc)(
-          pair_activations,
-          template_batch,
-          mask_2d,
-          is_training=is_training)
+        pair_activations,
+        template_batch,
+        mask_2d,
+        is_training=is_training)
 
       pair_activations += template_pair_representation
 
@@ -1773,47 +1782,47 @@ class EmbeddingsAndEvoformer(hk.Module):
     # Jumper et al. (2021) Suppl. Alg. 2 "Inference" lines 14-16
     extra_msa_feat = create_extra_msa_feature(batch)
     extra_msa_activations = common_modules.Linear(
-        c.extra_msa_channel,
-        name='extra_msa_activations')(
-            extra_msa_feat)
+      c.extra_msa_channel,
+      name='extra_msa_activations')(
+      extra_msa_feat)
 
     # Extra MSA Stack.
     # Jumper et al. (2021) Suppl. Alg. 18 "ExtraMsaStack"
     extra_msa_stack_input = {
-        'msa': extra_msa_activations,
-        'pair': pair_activations,
+      'msa': extra_msa_activations,
+      'pair': pair_activations,
     }
 
     extra_msa_stack_iteration = EvoformerIteration(
-        c.evoformer, gc, is_extra_msa=True, name='extra_msa_stack')
+      c.evoformer, gc, is_extra_msa=True, name='extra_msa_stack')
 
     def extra_msa_stack_fn(x):
       act, safe_key = x
       safe_key, safe_subkey = safe_key.split()
       extra_evoformer_output = extra_msa_stack_iteration(
-          activations=act,
-          masks={
-              'msa': batch['extra_msa_mask'],
-              'pair': mask_2d
-          },
-          is_training=is_training,
-          safe_key=safe_subkey)
+        activations=act,
+        masks={
+          'msa': batch['extra_msa_mask'],
+          'pair': mask_2d
+        },
+        is_training=is_training,
+        safe_key=safe_subkey)
       return (extra_evoformer_output, safe_key)
 
     if gc.use_remat:
       extra_msa_stack_fn = hk.remat(extra_msa_stack_fn)
 
     extra_msa_stack = layer_stack.layer_stack(
-        c.extra_msa_stack_num_block)(
-            extra_msa_stack_fn)
+      c.extra_msa_stack_num_block)(
+      extra_msa_stack_fn)
     extra_msa_output, safe_key = extra_msa_stack(
-        (extra_msa_stack_input, safe_key))
+      (extra_msa_stack_input, safe_key))
 
     pair_activations = extra_msa_output['pair']
 
     evoformer_input = {
-        'msa': msa_activations,
-        'pair': pair_activations,
+      'msa': msa_activations,
+      'pair': pair_activations,
     }
 
     evoformer_masks = {'msa': batch['msa_mask'], 'pair': mask_2d}
@@ -1829,81 +1838,81 @@ class EmbeddingsAndEvoformer(hk.Module):
       # Embed the templates aatype, torsion angles and masks.
       # Shape (templates, residues, msa_channels)
       ret = all_atom.atom37_to_torsion_angles(
-          aatype=batch['template_aatype'],
-          all_atom_pos=batch['template_all_atom_positions'],
-          all_atom_mask=batch['template_all_atom_masks'],
-          # Ensure consistent behaviour during testing:
-          placeholder_for_undefined=not gc.zero_init)
+        aatype=batch['template_aatype'],
+        all_atom_pos=batch['template_all_atom_positions'],
+        all_atom_mask=batch['template_all_atom_masks'],
+        # Ensure consistent behaviour during testing:
+        placeholder_for_undefined=not gc.zero_init)
 
       template_features = jnp.concatenate([
-          aatype_one_hot,
-          jnp.reshape(
-              ret['torsion_angles_sin_cos'], [num_templ, num_res, 14]),
-          jnp.reshape(
-              ret['alt_torsion_angles_sin_cos'], [num_templ, num_res, 14]),
-          ret['torsion_angles_mask']], axis=-1)
+        aatype_one_hot,
+        jnp.reshape(
+          ret['torsion_angles_sin_cos'], [num_templ, num_res, 14]),
+        jnp.reshape(
+          ret['alt_torsion_angles_sin_cos'], [num_templ, num_res, 14]),
+        ret['torsion_angles_mask']], axis=-1)
 
       template_activations = common_modules.Linear(
-          c.msa_channel,
-          initializer='relu',
-          name='template_single_embedding')(
-              template_features)
+        c.msa_channel,
+        initializer='relu',
+        name='template_single_embedding')(
+        template_features)
       template_activations = jax.nn.relu(template_activations)
       template_activations = common_modules.Linear(
-          c.msa_channel,
-          initializer='relu',
-          name='template_projection')(
-              template_activations)
+        c.msa_channel,
+        initializer='relu',
+        name='template_projection')(
+        template_activations)
 
       # Concatenate the templates to the msa.
       evoformer_input['msa'] = jnp.concatenate(
-          [evoformer_input['msa'], template_activations], axis=0)
+        [evoformer_input['msa'], template_activations], axis=0)
       # Concatenate templates masks to the msa masks.
       # Use mask from the psi angle, as it only depends on the backbone atoms
       # from a single residue.
       torsion_angle_mask = ret['torsion_angles_mask'][:, :, 2]
       torsion_angle_mask = torsion_angle_mask.astype(
-          evoformer_masks['msa'].dtype)
+        evoformer_masks['msa'].dtype)
       evoformer_masks['msa'] = jnp.concatenate(
-          [evoformer_masks['msa'], torsion_angle_mask], axis=0)
+        [evoformer_masks['msa'], torsion_angle_mask], axis=0)
 
     # Main trunk of the network
     # Jumper et al. (2021) Suppl. Alg. 2 "Inference" lines 17-18
     evoformer_iteration = EvoformerIteration(
-        c.evoformer, gc, is_extra_msa=False, name='evoformer_iteration')
+      c.evoformer, gc, is_extra_msa=False, name='evoformer_iteration')
 
     def evoformer_fn(x):
       act, safe_key = x
       safe_key, safe_subkey = safe_key.split()
       evoformer_output = evoformer_iteration(
-          activations=act,
-          masks=evoformer_masks,
-          is_training=is_training,
-          safe_key=safe_subkey)
+        activations=act,
+        masks=evoformer_masks,
+        is_training=is_training,
+        safe_key=safe_subkey)
       return (evoformer_output, safe_key)
 
     if gc.use_remat:
       evoformer_fn = hk.remat(evoformer_fn)
 
     evoformer_stack = layer_stack.layer_stack(c.evoformer_num_block)(
-        evoformer_fn)
+      evoformer_fn)
     evoformer_output, safe_key = evoformer_stack(
-        (evoformer_input, safe_key))
+      (evoformer_input, safe_key))
 
     msa_activations = evoformer_output['msa']
     pair_activations = evoformer_output['pair']
 
     single_activations = common_modules.Linear(
-        c.seq_channel, name='single_activations')(
-            msa_activations[0])
+      c.seq_channel, name='single_activations')(
+      msa_activations[0])
 
     num_sequences = batch['msa_feat'].shape[0]
     output = {
-        'single': single_activations,
-        'pair': pair_activations,
-        # Crop away template rows such that they are not used in MaskedMsaHead.
-        'msa': msa_activations[:num_sequences, :, :],
-        'msa_first_row': msa_activations[0],
+      'single': single_activations,
+      'pair': pair_activations,
+      # Crop away template rows such that they are not used in MaskedMsaHead.
+      'msa': msa_activations[:num_sequences, :, :],
+      'msa_first_row': msa_activations[0],
     }
 
     return output
@@ -1956,25 +1965,25 @@ class SingleTemplateEmbedding(hk.Module):
 
     n, ca, c = [residue_constants.atom_order[a] for a in ('N', 'CA', 'C')]
     rot, trans = quat_affine.make_transform_from_reference(
-        n_xyz=batch['template_all_atom_positions'][:, n],
-        ca_xyz=batch['template_all_atom_positions'][:, ca],
-        c_xyz=batch['template_all_atom_positions'][:, c])
+      n_xyz=batch['template_all_atom_positions'][:, n],
+      ca_xyz=batch['template_all_atom_positions'][:, ca],
+      c_xyz=batch['template_all_atom_positions'][:, c])
     affines = quat_affine.QuatAffine(
-        quaternion=quat_affine.rot_to_quat(rot, unstack_inputs=True),
-        translation=trans,
-        rotation=rot,
-        unstack_inputs=True)
+      quaternion=quat_affine.rot_to_quat(rot, unstack_inputs=True),
+      translation=trans,
+      rotation=rot,
+      unstack_inputs=True)
     points = [jnp.expand_dims(x, axis=-2) for x in affines.translation]
     affine_vec = affines.invert_point(points, extra_dims=1)
     inv_distance_scalar = jax.lax.rsqrt(
-        1e-6 + sum([jnp.square(x) for x in affine_vec]))
+      1e-6 + sum([jnp.square(x) for x in affine_vec]))
 
     # Backbone affine mask: whether the residue has C, CA, N
     # (the template mask defined above only considers pseudo CB).
     template_mask = (
-        batch['template_all_atom_masks'][..., n] *
-        batch['template_all_atom_masks'][..., ca] *
-        batch['template_all_atom_masks'][..., c])
+            batch['template_all_atom_masks'][..., n] *
+            batch['template_all_atom_masks'][..., ca] *
+            batch['template_all_atom_masks'][..., c])
     template_mask_2d = template_mask[:, None] * template_mask[None, :]
 
     inv_distance_scalar *= template_mask_2d.astype(inv_distance_scalar.dtype)
@@ -1997,15 +2006,15 @@ class SingleTemplateEmbedding(hk.Module):
 
     # Jumper et al. (2021) Suppl. Alg. 2 "Inference" line 9
     act = common_modules.Linear(
-        num_channels,
-        initializer='relu',
-        name='embedding2d')(
-            act)
+      num_channels,
+      initializer='relu',
+      name='embedding2d')(
+      act)
 
     # Jumper et al. (2021) Suppl. Alg. 2 "Inference" line 11
     act = TemplatePairStack(
-        self.config.template_pair_stack, self.global_config)(
-            act, mask_2d, is_training)
+      self.config.template_pair_stack, self.global_config)(
+      act, mask_2d, is_training)
 
     act = hk.LayerNorm([-1], True, True, name='output_layer_norm')(act)
     return act
@@ -2057,7 +2066,7 @@ class TemplateEmbedding(hk.Module):
       return template_embedder(query_embedding, batch, mask_2d, is_training)
 
     template_pair_representation = mapping.sharded_map(map_fn, in_axes=0)(
-        template_batch)
+      template_batch)
 
     # Cross attend from the query to the templates along the residue
     # dimension by flattening everything else into the batch dimension.
@@ -2066,22 +2075,22 @@ class TemplateEmbedding(hk.Module):
                              [num_res * num_res, 1, query_num_channels])
 
     flat_templates = jnp.reshape(
-        jnp.transpose(template_pair_representation, [1, 2, 0, 3]),
-        [num_res * num_res, num_templates, num_channels])
+      jnp.transpose(template_pair_representation, [1, 2, 0, 3]),
+      [num_res * num_res, num_templates, num_channels])
 
     bias = (1e9 * (template_mask[None, None, None, :] - 1.))
 
     template_pointwise_attention_module = Attention(
-        self.config.attention, self.global_config, query_num_channels)
+      self.config.attention, self.global_config, query_num_channels)
     nonbatched_args = [bias]
     batched_args = [flat_query, flat_templates]
 
     embedding = mapping.inference_subbatch(
-        template_pointwise_attention_module,
-        self.config.subbatch_size,
-        batched_args=batched_args,
-        nonbatched_args=nonbatched_args,
-        low_memory=not is_training)
+      template_pointwise_attention_module,
+      self.config.subbatch_size,
+      batched_args=batched_args,
+      nonbatched_args=nonbatched_args,
+      low_memory=not is_training)
     embedding = jnp.reshape(embedding,
                             [num_res, num_res, query_num_channels])
 
